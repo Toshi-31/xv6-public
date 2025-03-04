@@ -7,6 +7,36 @@
 #include "proc.h"
 #include "spinlock.h"
 
+
+
+// int blocked_syscalls[100]; // Assuming 32 syscalls max
+
+struct history_entry *history_head = 0;
+
+void add_history_entry(int pid, char *name, int mem_usage) {
+  struct history_entry *new_entry = (struct history_entry*)kalloc();
+  if (!new_entry)
+      return; // Memory allocation failed
+
+  new_entry->pid = pid;
+  safestrcpy(new_entry->name, name, sizeof(new_entry->name));
+  new_entry->mem_usage = mem_usage;
+  new_entry->next = 0;
+
+  // Append at the end to maintain ascending order
+  if (!history_head) {
+      history_head = new_entry;
+  } else {
+      struct history_entry *temp = history_head;
+      while (temp->next) {
+          temp = temp->next;
+      }
+      temp->next = new_entry;
+  }
+}
+
+
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -26,14 +56,11 @@ pinit(void)
   initlock(&ptable.lock, "ptable");
 }
 
-// Must be called with interrupts disabled
 int
 cpuid() {
   return mycpu()-cpus;
 }
 
-// Must be called with interrupts disabled to avoid the caller being
-// rescheduled between reading lapicid and running through the loop.
 struct cpu*
 mycpu(void)
 {
@@ -43,8 +70,7 @@ mycpu(void)
     panic("mycpu called with interrupts enabled\n");
   
   apicid = lapicid();
-  // APIC IDs are not guaranteed to be contiguous. Maybe we should have
-  // a reverse map, or reserve a register to store &cpus[i].
+
   for (i = 0; i < ncpu; ++i) {
     if (cpus[i].apicid == apicid)
       return &cpus[i];
@@ -52,8 +78,7 @@ mycpu(void)
   panic("unknown apicid\n");
 }
 
-// Disable interrupts so that we are not rescheduled
-// while reading proc from the cpu structure
+
 struct proc*
 myproc(void) {
   struct cpu *c;
@@ -65,11 +90,7 @@ myproc(void) {
   return p;
 }
 
-//PAGEBREAK: 32
-// Look in the process table for an UNUSED proc.
-// If found, change state to EMBRYO and initialize
-// state required to run in the kernel.
-// Otherwise return 0.
+
 static struct proc*
 allocproc(void)
 {
@@ -91,19 +112,15 @@ found:
 
   release(&ptable.lock);
 
-  // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
     p->state = UNUSED;
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
 
-  // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
 
-  // Set up new context to start executing at forkret,
-  // which returns to trapret.
   sp -= 4;
   *(uint*)sp = (uint)trapret;
 
@@ -111,12 +128,13 @@ found:
   p->context = (struct context*)sp;
   memset(p->context, 0, sizeof *p->context);
   p->context->eip = (uint)forkret;
-
+  // cprintf("printing name of process");
+  // cprintf(p->name);
+  memset(p->blocked_syscalls, 0, sizeof(p->blocked_syscalls));
+  memset(p->blocked_syscalls_pending, 0, sizeof(p->blocked_syscalls_pending));
   return p;
 }
 
-//PAGEBREAK: 32
-// Set up first user process.
 void
 userinit(void)
 {
@@ -137,24 +155,18 @@ userinit(void)
   p->tf->ss = p->tf->ds;
   p->tf->eflags = FL_IF;
   p->tf->esp = PGSIZE;
-  p->tf->eip = 0;  // beginning of initcode.S
+  p->tf->eip = 0;  
 
   safestrcpy(p->name, "initcode", sizeof(p->name));
+  cprintf("userinit");
+  cprintf(p->name);
   p->cwd = namei("/");
-
-  // this assignment to p->state lets other cores
-  // run this process. the acquire forces the above
-  // writes to be visible, and the lock is also needed
-  // because the assignment might not be atomic.
   acquire(&ptable.lock);
 
   p->state = RUNNABLE;
-
   release(&ptable.lock);
 }
 
-// Grow current process's memory by n bytes.
-// Return 0 on success, -1 on failure.
 int
 growproc(int n)
 {
@@ -174,9 +186,6 @@ growproc(int n)
   return 0;
 }
 
-// Create a new process copying p as the parent.
-// Sets up stack to return as if from system call.
-// Caller must set state of returned proc to RUNNABLE.
 int
 fork(void)
 {
@@ -203,13 +212,15 @@ fork(void)
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
+  memmove(np->blocked_syscalls, curproc->blocked_syscalls_pending, sizeof(np->blocked_syscalls));
+  memmove(np->blocked_syscalls_pending, curproc->blocked_syscalls_pending, sizeof(np->blocked_syscalls_pending));
   for(i = 0; i < NOFILE; i++)
     if(curproc->ofile[i])
       np->ofile[i] = filedup(curproc->ofile[i]);
   np->cwd = idup(curproc->cwd);
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
-
+  
   pid = np->pid;
 
   acquire(&ptable.lock);
@@ -217,19 +228,18 @@ fork(void)
   np->state = RUNNABLE;
 
   release(&ptable.lock);
-
   return pid;
 }
 
-// Exit the current process.  Does not return.
-// An exited process remains in the zombie state
-// until its parent calls wait() to find out it exited.
 void
 exit(void)
 {
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
+  if(strncmp(curproc->name, "sh",2) != 0 && strncmp(curproc->name, "init",4) != 0) {
+    add_history_entry(curproc->pid, curproc->name, curproc->sz);
+  }
 
   if(curproc == initproc)
     panic("init exiting");
@@ -531,4 +541,13 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int gethistory(void) {
+  struct history_entry *curr = history_head;
+  while (curr) {
+      cprintf("%d %s %d\n", curr->pid, curr->name, curr->mem_usage);
+      curr = curr->next;
+  }
+  return 0;
 }

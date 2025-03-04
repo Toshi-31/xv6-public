@@ -10,6 +10,24 @@ struct cpu {
   struct proc *proc;           // The process running on this cpu or null
 };
 
+struct history_entry {
+  int pid;
+  char name[16];
+  int mem_usage; // in bytes
+  struct history_entry *next;
+};
+
+extern struct history_entry *history_head;
+void add_history_entry(int pid, char *name, int mem_usage);
+int gethistory(void);
+
+struct ProcessHistory {
+  int pid;
+  char name[16];  // Process name
+  uint total_memory;  // Total memory utilization
+  struct ProcessHistory *next;  // Pointer to next history entry
+};
+
 extern struct cpu cpus[NCPU];
 extern int ncpu;
 
@@ -49,6 +67,12 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct ProcessHistory *history_head;  // Head of dynamic history list
+  struct ProcessHistory *history_tail;  // Tail of dynamic history list
+  int history_count;
+  int blocked_syscalls[25];   // Determines if a syscall is currently blocked (used for checking)
+  int blocked_syscalls_pending[25];  // Stores changes when block/unblock is called
+
 };
 
 // Process memory is laid out contiguously, low addresses first:

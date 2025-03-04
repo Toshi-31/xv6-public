@@ -23,6 +23,12 @@ int getpid(void);
 char* sbrk(int);
 int sleep(int);
 int uptime(void);
+int gethistory(void);
+// int gethistory(struct ProcessHistory *history);
+int block(int syscall_id);
+int unblock(int syscall_id);
+
+
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -37,3 +43,4 @@ void* memset(void*, int, uint);
 void* malloc(uint);
 void free(void*);
 int atoi(const char*);
+

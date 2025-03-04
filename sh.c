@@ -54,8 +54,83 @@ void panic(char*);
 struct cmd *parsecmd(char*);
 
 // Execute cmd.  Never returns.
-void
-runcmd(struct cmd *cmd)
+// void
+// runcmd(struct cmd *cmd)
+// {
+//   int p[2];
+//   struct backcmd *bcmd;
+//   struct execcmd *ecmd;
+//   struct listcmd *lcmd;
+//   struct pipecmd *pcmd;
+//   struct redircmd *rcmd;
+
+//   if(cmd == 0)
+//     exit();
+
+//   switch(cmd->type){
+//   default:
+//     panic("runcmd");
+
+//   case EXEC:
+//     ecmd = (struct execcmd*)cmd;
+//     if(ecmd->argv[0] == 0)
+//       exit();
+//     exec(ecmd->argv[0], ecmd->argv);
+//     printf(2, "exec %s failed\n", ecmd->argv[0]);
+//     break;
+
+//   case REDIR:
+//     rcmd = (struct redircmd*)cmd;
+//     close(rcmd->fd);
+//     if(open(rcmd->file, rcmd->mode) < 0){
+//       printf(2, "open %s failed\n", rcmd->file);
+//       exit();
+//     }
+//     runcmd(rcmd->cmd);
+//     break;
+
+//   case LIST:
+//     lcmd = (struct listcmd*)cmd;
+//     if(fork1() == 0)
+//       runcmd(lcmd->left);
+//     wait();
+//     runcmd(lcmd->right);
+//     break;
+
+//   case PIPE:
+//     pcmd = (struct pipecmd*)cmd;
+//     if(pipe(p) < 0)
+//       panic("pipe");
+//     if(fork1() == 0){
+//       close(1);
+//       dup(p[1]);
+//       close(p[0]);
+//       close(p[1]);
+//       runcmd(pcmd->left);
+//     }
+//     if(fork1() == 0){
+//       close(0);
+//       dup(p[0]);
+//       close(p[0]);
+//       close(p[1]);
+//       runcmd(pcmd->right);
+//     }
+//     close(p[0]);
+//     close(p[1]);
+//     wait();
+//     wait();
+//     break;
+
+//   case BACK:
+//     bcmd = (struct backcmd*)cmd;
+//     if(fork1() == 0)
+//       runcmd(bcmd->cmd);
+//     break;
+//   }
+//   exit();
+// }
+
+void runcmd(struct cmd *cmd)
 {
   int p[2];
   struct backcmd *bcmd;
@@ -75,6 +150,13 @@ runcmd(struct cmd *cmd)
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit();
+
+    // Handle the "history" command
+    if (strcmp(ecmd->argv[0], "history") == 0) {
+        gethistory();  // Call the system call
+        return;        // Exit to avoid further execution
+    }
+
     exec(ecmd->argv[0], ecmd->argv);
     printf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
@@ -141,35 +223,94 @@ getcmd(char *buf, int nbuf)
   return 0;
 }
 
-int
-main(void)
-{
+// int
+// main(void)
+// {
+//   static char buf[100];
+//   int fd;
+
+//   // Ensure that three file descriptors are open.
+//   while((fd = open("console", O_RDWR)) >= 0){
+//     if(fd >= 3){
+//       close(fd);
+//       break;
+//     }
+//   }
+
+//   // Read and run input commands.
+//   while(getcmd(buf, sizeof(buf)) >= 0){
+//     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
+//       // Chdir must be called by the parent, not the child.
+//       buf[strlen(buf)-1] = 0;  // chop \n
+//       if(chdir(buf+3) < 0)
+//         printf(2, "cannot cd %s\n", buf+3);
+//       continue;
+//     }
+//     if(fork1() == 0)
+//       runcmd(parsecmd(buf));
+//     wait();
+//   }
+//   exit();
+// }
+
+#include "types.h"
+#include "user.h"
+
+int main(void) {
   static char buf[100];
   int fd;
 
   // Ensure that three file descriptors are open.
-  while((fd = open("console", O_RDWR)) >= 0){
-    if(fd >= 3){
+  while ((fd = open("console", O_RDWR)) >= 0) {
+    if (fd >= 3) {
       close(fd);
       break;
     }
   }
 
   // Read and run input commands.
-  while(getcmd(buf, sizeof(buf)) >= 0){
-    if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
-      // Chdir must be called by the parent, not the child.
-      buf[strlen(buf)-1] = 0;  // chop \n
-      if(chdir(buf+3) < 0)
-        printf(2, "cannot cd %s\n", buf+3);
+  while (getcmd(buf, sizeof(buf)) >= 0) {
+    buf[strlen(buf) - 1] = 0; // Remove trailing newline
+
+    // Handle "cd" command
+    if (buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' ') {
+      if (chdir(buf + 3) < 0)
+        printf(2, "cannot cd %s\n", buf + 3);
       continue;
     }
-    if(fork1() == 0)
+
+    // Handle "block" command
+    if (buf[0] == 'b' && buf[1] == 'l' && buf[2] == 'o' &&
+        buf[3] == 'c' && buf[4] == 'k' && buf[5] == ' ') {
+      int syscall_id = atoi(buf + 6);
+      if (block(syscall_id) < 0)
+        printf(2, "Failed to block syscall %d\n", syscall_id);
+      else
+        printf(1, "Blocked syscall %d\n", syscall_id);
+      continue;
+    }
+
+    // Handle "unblock" command
+    if (buf[0] == 'u' && buf[1] == 'n' && buf[2] == 'b' &&
+        buf[3] == 'l' && buf[4] == 'o' && buf[5] == 'c' &&
+        buf[6] == 'k' && buf[7] == ' ') {
+      int syscall_id = atoi(buf + 8);
+      if (unblock(syscall_id) < 0)
+        printf(2, "Failed to unblock syscall %d\n", syscall_id);
+      else
+        printf(1, "Unblocked syscall %d\n", syscall_id);
+      continue;
+    }
+
+    // Fork and execute other commands
+    if (fork1() == 0)
       runcmd(parsecmd(buf));
     wait();
   }
+
   exit();
 }
+
 
 void
 panic(char *s)

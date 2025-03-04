@@ -101,6 +101,7 @@ exec(char *path, char **argv)
   curproc->tf->esp = sp;
   switchuvm(curproc);
   freevm(oldpgdir);
+  // add_history_entry(curproc->pid, curproc->name, curproc->sz);
   return 0;
 
  bad:
