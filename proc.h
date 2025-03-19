@@ -57,6 +57,14 @@ struct proc {
   int cpu_ticks;     // CPU ticks consumed (Ci(t)).
   int wait_time;     // Accumulated waiting time (Wi(t)).
   int priority;      // Dynamic priority πi(t)
+  int tat;        // Turnaround time
+  int wt;         // Waiting time
+  int rt;         // Response time
+  int cs;         // Number of context switches
+  int first_scheduled;  // Flag to track first time process gets CPU
+  uint start_time;  // Time when process starts execution
+  uint end_time;    // Time when process ends
+  uint creation_time;
 };
 
 // Process memory is laid out contiguously, low addresses first:

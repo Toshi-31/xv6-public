@@ -217,6 +217,9 @@ fork(void)
   np->state = RUNNABLE;
   np->exec_time=-1;
   np->start_later=0;
+  np->creation_time = ticks;  // Track process creation time
+  np->first_scheduled = 0;
+  np->cs = 0;  // Initialize context switch count
 
   release(&ptable.lock);
 
@@ -250,6 +253,17 @@ exit(void)
   curproc->cwd = 0;
 
   acquire(&ptable.lock);
+
+  curproc->end_time = ticks; // Record process completion time
+  curproc->tat = curproc->end_time - curproc->creation_time;
+  curproc->wt = curproc->tat - curproc->cpu_ticks;  // WT = TAT - CPU execution time
+
+  cprintf("\nPID: %d\n", curproc->pid);
+  cprintf("TAT: %d\n", curproc->tat);
+  cprintf("WT: %d\n", curproc->wt);
+  cprintf("RT: %d\n", curproc->rt);
+  cprintf("#CS: %d\n", curproc->cs);
+
 
   // Parent might be sleeping in wait().
   wakeup1(curproc->parent);
@@ -478,7 +492,7 @@ scheduler(void)
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
-      p->wait_time++;
+      // p->wait_time++;
       
       p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
       
@@ -487,10 +501,18 @@ scheduler(void)
       for(p1=ptable.proc; p1<&ptable.proc[NPROC];p1++){
           if(p1->state != RUNNABLE)
             continue;
+          
+          p1->wait_time++;
+          
           p1->priority = INITIAL_PRIORITY - ALPHA * p1->cpu_ticks + BETA * p1->wait_time;
-          if(highP->priority > p1->priority||(highP->priority==p1->priority && highP->pid>p1->pid)) // larger value, lower priority
+          if(highP->priority < p1->priority||(highP->priority==p1->priority && highP->pid>p1->pid)) // larger value, lower priority
             highP = p1;
       }
+      if (highP->first_scheduled == 0) {
+        highP->rt = ticks - highP->creation_time;  // Response time = first execution - creation
+        highP->first_scheduled = 1;
+      }
+      highP->cs++;  // Count context switches
       p = highP;
       c->proc = p;
       switchuvm(p);
@@ -559,6 +581,9 @@ int custom_fork(int start_later, int exec_time) {
   curproc->cpu_ticks = 0;
   curproc->wait_time = 0;
   curproc->priority = INITIAL_PRIORITY;
+  np->creation_time = ticks;  // Track process creation time
+  np->first_scheduled = 0;
+  np->cs = 0;  // Initialize context switch count
 
   pid = np->pid;
 
