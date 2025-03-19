@@ -479,12 +479,15 @@ scheduler(void)
       if(p->state != RUNNABLE)
         continue;
       p->wait_time++;
-      highP = p;
+      
       p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+      
+      highP = p;
       // Choose one with highest priority
       for(p1=ptable.proc; p1<&ptable.proc[NPROC];p1++){
           if(p1->state != RUNNABLE)
             continue;
+          p1->priority = INITIAL_PRIORITY - ALPHA * p1->cpu_ticks + BETA * p1->wait_time;
           if(highP->priority > p1->priority||(highP->priority==p1->priority && highP->pid>p1->pid)) // larger value, lower priority
             highP = p1;
       }
