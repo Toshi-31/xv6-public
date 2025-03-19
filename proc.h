@@ -12,6 +12,9 @@ struct cpu {
 
 extern struct cpu cpus[NCPU];
 extern int ncpu;
+int custom_fork(int start_later, int exec_time);
+void scheduler_start(void);
+
 
 //PAGEBREAK: 17
 // Saved registers for kernel context switches.
@@ -49,6 +52,11 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int exec_time;     // Execution time limit (in ticks); -1 for indefinite execution.
+  int start_later;   // Flag: 1 if process should not start immediately.
+  int cpu_ticks;     // CPU ticks consumed (Ci(t)).
+  int wait_time;     // Accumulated waiting time (Wi(t)).
+  int priority;      // Dynamic priority πi(t)
 };
 
 // Process memory is laid out contiguously, low addresses first:

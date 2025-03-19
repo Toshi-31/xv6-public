@@ -7,6 +7,18 @@
 #include "mmu.h"
 #include "proc.h"
 
+int sys_custom_fork(void) {
+  int start_later, exec_time;
+  if (argint(0, &start_later) < 0 || argint(1, &exec_time) < 0)
+      return -1;
+  return custom_fork(start_later, exec_time);
+}
+
+
+int sys_scheduler_start(void) {
+  scheduler_start();
+  return 0;
+}
 int
 sys_fork(void)
 {

@@ -215,6 +215,8 @@ fork(void)
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
+  np->exec_time=-1;
+  np->start_later=0;
 
   release(&ptable.lock);
 
@@ -311,6 +313,45 @@ wait(void)
   }
 }
 
+// int wait(void) {
+//   struct proc *p;
+//   int havekids, pid;
+//   struct proc *curproc = myproc();
+
+//   acquire(&ptable.lock);
+//   for (;;) {
+//       havekids = 0;
+//       for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+//           if (p->parent != curproc)
+//               continue;
+//           havekids = 1;
+//           if (p->state == ZOMBIE) {
+//               pid = p->pid;
+//               // Clean up the process
+//               kfree(p->kstack);
+//               p->kstack = 0;
+//               freevm(p->pgdir);
+//               p->state = UNUSED;
+//               p->pid = 0;
+//               p->parent = 0;
+//               p->name[0] = 0;
+//               release(&ptable.lock);
+//               return pid;
+//           }
+//       }
+//       if (!havekids || curproc->killed) {
+//           release(&ptable.lock);
+//           return -1;
+//       }
+//       // sleep(curproc, &ptable.lock); // Wait for child process to finish
+//       release(&ptable.lock);  // ✅ Release lock before sleeping
+//       sleep(curproc, &ptable.lock);
+//       acquire(&ptable.lock);  // ✅ Reacquire after waking up
+
+//   }
+// }
+
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -319,41 +360,42 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
-void
-scheduler(void)
-{
-  struct proc *p;
-  struct cpu *c = mycpu();
-  c->proc = 0;
+
+// void
+// scheduler(void)
+// {
+//   struct proc *p;
+//   struct cpu *c = mycpu();
+//   c->proc = 0;
   
-  for(;;){
-    // Enable interrupts on this processor.
-    sti();
+//   for(;;){
+//     // Enable interrupts on this processor.
+//     sti();
 
-    // Loop over process table looking for process to run.
-    acquire(&ptable.lock);
-    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+//     // Loop over process table looking for process to run.
+//     acquire(&ptable.lock);
+//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//       if(p->state != RUNNABLE)
+//         continue;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+//       // Switch to chosen process.  It is the process's job
+//       // to release ptable.lock and then reacquire it
+//       // before jumping back to us.
+//       c->proc = p;
+//       switchuvm(p);
+//       p->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+//       swtch(&(c->scheduler), p->context);
+//       switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&ptable.lock);
+//       // Process is done running for now.
+//       // It should have changed its p->state before coming back.
+//       c->proc = 0;
+//     }
+//     release(&ptable.lock);
 
-  }
-}
+//   }
+// }
 
 // Enter scheduler.  Must hold only ptable.lock
 // and have changed proc->state. Saves and restores
@@ -362,6 +404,174 @@ scheduler(void)
 // be proc->intena and proc->ncli, but that would
 // break in the few places where a lock is held but
 // there's no process.
+
+// void scheduler(void) {
+//   struct proc *p, *best;
+//   struct cpu *c = mycpu();
+//   c->proc = 0;
+
+//   for (;;) {
+//       sti(); // Enable interrupts on this processor
+
+//       acquire(&ptable.lock);
+
+//       best = 0;
+
+//       // Loop over the process table to find the highest-priority RUNNABLE process.
+//       for (p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+//           if (p->state != RUNNABLE)
+//               continue;
+//           cprintf("considered this one");
+//           cprintf("pid in loop: %d\n", p->pid);
+//           // Increase wait time for all RUNNABLE processes.
+//           p->wait_time++;
+
+//           // Compute dynamic priority based on CPU usage and wait time.
+//           p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+
+//           // Select the process with the highest priority.
+//           if (best == 0 || p->priority > best->priority || 
+//               (p->priority == best->priority && p->pid < best->pid)) {
+//               best = p;
+//           }
+//       }
+
+//       if (best) {
+//         cprintf("the best process below\n");
+//         cprintf("PID: %d\n", best->pid);
+//           best->state = RUNNING;
+//           best->cpu_ticks++;  // Increment CPU usage time
+//           best->wait_time = 0; // Reset wait time since it's running now
+
+//           // If the process has a time limit and has used up its execution time, terminate it.
+//           if (best->exec_time != -1 && best->cpu_ticks >= best->exec_time) {
+//               best->state = ZOMBIE; // Mark for cleanup
+//           } else {
+//               // Context switch to the chosen process
+//               c->proc = best;
+//               switchuvm(best);
+//               swtch(&(c->scheduler), best->context);
+//               switchkvm();
+//               c->proc = 0; // Reset CPU process pointer
+//           }
+//       }
+
+//       release(&ptable.lock);
+//   }
+// }
+
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct proc *p1;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+
+  for(;;){
+    // Enable interrupts on this processor.
+    sti();
+
+    struct proc *highP =  0;
+    // Loop over process table looking for process to run.
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state != RUNNABLE)
+        continue;
+      p->wait_time++;
+      highP = p;
+      p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+      // Choose one with highest priority
+      for(p1=ptable.proc; p1<&ptable.proc[NPROC];p1++){
+          if(p1->state != RUNNABLE)
+            continue;
+          if(highP->priority > p1->priority||(highP->priority==p1->priority && highP->pid>p1->pid)) // larger value, lower priority
+            highP = p1;
+      }
+      p = highP;
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;
+      p->cpu_ticks++;  // Increment CPU usage time
+      p->wait_time = 0;
+      swtch(&(c->scheduler), p->context);
+      switchkvm();
+
+      c->proc = 0;
+    }
+    release(&ptable.lock);
+
+  }
+}
+
+void
+scheduler_start(void)
+{
+  struct proc *p;
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      // For all processes that are delayed and sleeping
+      if(p->state == SLEEPING && p->start_later) {
+          p->state = RUNNABLE;
+          p->start_later = 0;  // Clear the flag once activated.
+      }
+  }
+  release(&ptable.lock);
+}
+
+int custom_fork(int start_later, int exec_time) {
+  int i, pid;
+  struct proc *np;
+  struct proc *curproc = myproc();
+
+  // Allocate process.
+  if ((np = allocproc()) == 0) {
+      return -1;
+  }
+
+  // Copy process state from parent.
+  if ((np->pgdir = copyuvm(curproc->pgdir, curproc->sz)) == 0) {
+      kfree(np->kstack);
+      np->kstack = 0;
+      np->state = UNUSED;
+      return -1;
+  }
+  np->sz = curproc->sz;
+  np->parent = curproc;
+  *np->tf = *curproc->tf;
+
+  // Clear %eax so that fork returns 0 in the child.
+  np->tf->eax = 0;
+
+  for (i = 0; i < NOFILE; i++)
+      if (curproc->ofile[i])
+          np->ofile[i] = filedup(curproc->ofile[i]);
+  np->cwd = idup(curproc->cwd);
+
+  safestrcpy(np->name, curproc->name, sizeof(curproc->name));
+
+  // Assign start_later and exec_time
+  np->start_later = start_later;
+  np->exec_time = exec_time;
+  curproc->cpu_ticks = 0;
+  curproc->wait_time = 0;
+  curproc->priority = INITIAL_PRIORITY;
+
+  pid = np->pid;
+
+  acquire(&ptable.lock);
+
+  // If start_later is set, keep it in SLEEPING state until sys_scheduler_start() is called
+  if (start_later)
+      np->state = SLEEPING;
+  else
+      np->state = RUNNABLE;
+
+  release(&ptable.lock);
+
+  return pid;
+}
+
 void
 sched(void)
 {

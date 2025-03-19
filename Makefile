@@ -76,7 +76,7 @@ AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
 OBJCOPY = $(TOOLPREFIX)objcopy
 OBJDUMP = $(TOOLPREFIX)objdump
-INITIAL_PRIORITY = 10
+INITIAL_PRIORITY = 1
 ALPHA = 1
 BETA = 1
 CFLAGS = -fno-pic -static -fno-builtin -fno-strict-aliasing -O2 -Wall -MD -ggdb -m32 -Werror -fno-omit-frame-pointer
@@ -185,6 +185,7 @@ UPROGS=\
 	_usertests\
 	_wc\
 	_zombie\
+	_testcase\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)
