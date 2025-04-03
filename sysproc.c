@@ -6,6 +6,16 @@
 #include "memlayout.h"
 #include "mmu.h"
 #include "proc.h"
+#include "spinlock.h"
+
+
+// int sys_sigfg(void){
+//   return sigfg();
+// }
+
+// int sys_sigbg(void){
+//   return sigbg();
+// }
 
 int sys_custom_fork(void) {
   int start_later, exec_time;

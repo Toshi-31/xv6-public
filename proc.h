@@ -10,6 +10,7 @@ struct cpu {
   struct proc *proc;           // The process running on this cpu or null
 };
 
+
 extern struct cpu cpus[NCPU];
 extern int ncpu;
 int custom_fork(int start_later, int exec_time);
@@ -35,7 +36,8 @@ struct context {
   uint eip;
 };
 
-enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+
+enum procstate { UNUSED, EMBRYO, SLEEPING, RUNNABLE, RUNNING, ZOMBIE};
 
 // Per-process state
 struct proc {

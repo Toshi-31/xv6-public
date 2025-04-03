@@ -11,7 +11,10 @@
 #define LIST  4
 #define BACK  5
 
+
 #define MAXARGS 10
+
+
 
 struct cmd {
   int type;
@@ -141,36 +144,71 @@ getcmd(char *buf, int nbuf)
   return 0;
 }
 
-int
-main(void)
-{
+// int
+// main(void)
+// {
+//   static char buf[100];
+//   int fd;
+
+//   // Ensure that three file descriptors are open.
+//   while((fd = open("console", O_RDWR)) >= 0){
+//     if(fd >= 3){
+//       close(fd);
+//       break;
+//     }
+//   }
+
+//   // Read and run input commands.
+//   while(getcmd(buf, sizeof(buf)) >= 0){
+//     if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
+//       // Chdir must be called by the parent, not the child.
+//       buf[strlen(buf)-1] = 0;  // chop \n
+//       if(chdir(buf+3) < 0)
+//         printf(2, "cannot cd %s\n", buf+3);
+//       continue;
+//     }
+//     if(fork1() == 0)
+//       runcmd(parsecmd(buf));
+//     wait();
+//   }
+//   exit();
+// }
+
+int main(void) {
   static char buf[100];
   int fd;
 
   // Ensure that three file descriptors are open.
-  while((fd = open("console", O_RDWR)) >= 0){
-    if(fd >= 3){
-      close(fd);
-      break;
-    }
+  while ((fd = open("console", O_RDWR)) >= 0) {
+      if (fd >= 3) {
+          close(fd);
+          break;
+      }
   }
 
+  // Register signal handlers
+  // signal(SIGBG, sig_handler);
+  // signal(SIGFG, sig_handler);
+
   // Read and run input commands.
-  while(getcmd(buf, sizeof(buf)) >= 0){
-    if(buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' '){
-      // Chdir must be called by the parent, not the child.
-      buf[strlen(buf)-1] = 0;  // chop \n
-      if(chdir(buf+3) < 0)
-        printf(2, "cannot cd %s\n", buf+3);
-      continue;
-    }
-    if(fork1() == 0)
-      runcmd(parsecmd(buf));
-    wait();
+  while (getcmd(buf, sizeof(buf)) >= 0) {
+      // Handle Ctrl+B (SIGBG)
+      
+      // Handle 'cd' command
+      if (buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' ') {
+          buf[strlen(buf) - 1] = 0; // Remove trailing newline
+          if (chdir(buf + 3) < 0)
+              printf(2, "cannot cd %s\n", buf + 3);
+          continue;
+      }
+
+      // Execute other commands
+      if (fork1() == 0)
+          runcmd(parsecmd(buf));
+      wait();
   }
   exit();
 }
-
 void
 panic(char *s)
 {
