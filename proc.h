@@ -67,6 +67,7 @@ struct proc {
   uint start_time;  // Time when process starts execution
   uint end_time;    // Time when process ends
   uint creation_time;
+  uint switches;
 };
 
 // Process memory is laid out contiguously, low addresses first:

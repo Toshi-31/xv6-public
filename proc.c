@@ -101,7 +101,10 @@ found:
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-
+  p->cpu_ticks = 0;
+  p->wait_time = 0;
+  p->creation_time = ticks;  // Track process creation time
+  p->cs = 0;  // Initialize context switch count
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -217,9 +220,10 @@ fork(void)
   np->state = RUNNABLE;
   np->exec_time=-1;
   np->start_later=0;
-  np->creation_time = ticks;  // Track process creation time
+  // np->creation_time = ticks;  // Track process creation time
+  // np->cs = 0;  // Initialize context switch count
   np->first_scheduled = 0;
-  np->cs = 0;  // Initialize context switch count
+  
 
   release(&ptable.lock);
 
@@ -235,7 +239,19 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-
+  curproc->end_time = ticks; // Record process completion time
+  // cprintf("End time: %d", curproc->end_time);
+  // cprintf("Start time: %d", curproc->creation_time);
+  curproc->tat = curproc->end_time - curproc->creation_time;
+  curproc->wt = curproc->tat - curproc->cpu_ticks;  // WT = TAT - CPU execution time
+  // cprintf("switches: %d\n",curproc->switches);
+  
+  cprintf("PID: %d\n", curproc->pid);
+  cprintf("TAT: %d\n", curproc->tat);
+  cprintf("WT: %d\n", curproc->wt);
+  cprintf("RT: %d\n", curproc->rt);
+  cprintf("#CS: %d\n", curproc->cs);
+  
   if(curproc == initproc)
     panic("init exiting");
 
@@ -254,15 +270,7 @@ exit(void)
 
   acquire(&ptable.lock);
 
-  curproc->end_time = ticks; // Record process completion time
-  curproc->tat = curproc->end_time - curproc->creation_time;
-  curproc->wt = curproc->tat - curproc->cpu_ticks;  // WT = TAT - CPU execution time
-
-  cprintf("\nPID: %d\n", curproc->pid);
-  cprintf("TAT: %d\n", curproc->tat);
-  cprintf("WT: %d\n", curproc->wt);
-  cprintf("RT: %d\n", curproc->rt);
-  cprintf("#CS: %d\n", curproc->cs);
+  
 
 
   // Parent might be sleeping in wait().
@@ -441,7 +449,7 @@ wait(void)
 //           p->wait_time++;
 
 //           // Compute dynamic priority based on CPU usage and wait time.
-//           p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+//           p->priority = INIT_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
 
 //           // Select the process with the highest priority.
 //           if (best == 0 || p->priority > best->priority || 
@@ -474,9 +482,9 @@ wait(void)
 //   }
 // }
 
+//BEST TILL NOW
 void
-scheduler(void)
-{
+scheduler(void){
   struct proc *p;
   struct proc *p1;
   struct cpu *c = mycpu();
@@ -486,15 +494,16 @@ scheduler(void)
     // Enable interrupts on this processor.
     sti();
 
-    struct proc *highP =  0;
+    
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+    struct proc *highP =  0;
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       if(p->state != RUNNABLE)
         continue;
       // p->wait_time++;
-      
-      p->priority = INITIAL_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+      p->wait_time=ticks-p->creation_time-p->cpu_ticks;
+      p->priority = INIT_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
       
       highP = p;
       // Choose one with highest priority
@@ -502,32 +511,220 @@ scheduler(void)
           if(p1->state != RUNNABLE)
             continue;
           
-          p1->wait_time++;
-          
-          p1->priority = INITIAL_PRIORITY - ALPHA * p1->cpu_ticks + BETA * p1->wait_time;
+          // p1->wait_time++;
+          p1->wait_time=ticks-p1->creation_time-p1->cpu_ticks;
+          p1->priority = INIT_PRIORITY - ALPHA * p1->cpu_ticks + BETA * p1->wait_time;
           if(highP->priority < p1->priority||(highP->priority==p1->priority && highP->pid>p1->pid)) // larger value, lower priority
             highP = p1;
       }
-      if (highP->first_scheduled == 0) {
-        highP->rt = ticks - highP->creation_time;  // Response time = first execution - creation
-        highP->first_scheduled = 1;
+      p=highP;
+      if (p->first_scheduled == 0) {
+        p->rt = ticks - highP->creation_time;  // Response time = first execution - creation
+        p->first_scheduled = 1;
       }
-      highP->cs++;  // Count context switches
-      p = highP;
+      p->cs++;  // Count context switches
+      // highP->cpu_ticks++;  // Increment CPU usage time
+      // p = highP;
+      p->wait_time = 0;
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
-      p->cpu_ticks++;  // Increment CPU usage time
-      p->wait_time = 0;
+      // int start=ticks;
       swtch(&(c->scheduler), p->context);
+      // int end=ticks;
+      // p->cpu_ticks+=(end-start);
       switchkvm();
 
       c->proc = 0;
+      break;
     }
+    // highP->cs++;  // Count context switches
+    // highP->cpu_ticks++;  // Increment CPU usage time
+    // highP->wait_time = 0;
     release(&ptable.lock);
 
   }
 }
+
+//SEE
+// void
+// scheduler(void){
+//   struct proc *p;
+//   struct cpu *c = mycpu();
+//   c->proc = 0;
+//   for(;;){
+//     // Enable interrupts on this processor.
+//     sti();
+//     // Loop over process able looking for process to run.
+//     acquire(&ptable.lock);
+//     struct proc *highP =  0;
+//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//       if(p->state != RUNNABLE)
+//         continue;
+//       // p->wait_time++;
+//       p->wait_time=ticks-p->creation_time-p->cpu_ticks;
+//       p->priority = INIT_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+//       if(highP->priority < p->priority||(highP->priority==p->priority && highP->pid>p->pid)) // larger value, lower priority
+//             highP = p;
+//     }
+//     p = highP;
+//       if (p->first_scheduled == 0) {
+//         p->rt = ticks - p->creation_time;  // Response time = first execution - creation
+//         p->first_scheduled = 1;
+//       }
+//       // p = highP;
+//       c->proc = p;
+//       switchuvm(p);
+//       p->state = RUNNING;
+//       // int start=ticks;
+//       swtch(&(c->scheduler), p->context);
+//       // int end=ticks;
+//       // p->cpu_ticks+=(end-start);
+//       p->cs++;
+//       // p->wait_time=0;
+//       switchkvm();
+//       c->proc = 0;
+//     }
+//     release(&ptable.lock);
+// }
+
+// void
+// scheduler(void)
+// {
+//   struct cpu *c = mycpu();
+//   struct proc *p;
+//   c->proc = 0;
+
+//   for(;;){
+//     sti();  // Enable interrupts on this processor
+
+//     acquire(&ptable.lock);
+
+//     struct proc *selected_proc = 0;
+
+//     // Loop to pick the process with highest dynamic priority
+//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//       if(p->state != RUNNABLE)
+//         continue;
+
+//       // Update waiting time
+//       // p->waiting_time = ticks - p->last_scheduled;
+
+//       // if (p->last_scheduled == 0)
+//       //   p->waiting_time = ticks - p->arrival_time;
+//       // else
+//       //   p->waiting_time = ticks - p->last_scheduled;
+
+
+//       int waiting_time = ticks - p->creation_time - p->cpu_ticks;
+//       if(waiting_time<0)waiting_time=0;
+
+//       // Compute dynamic priority using formula:
+//       // πi(t) = πi(0) - α·C(t) + β·W(t)
+//       p->priority = INIT_PRIORITY - (ALPHA * p->cpu_ticks) + (BETA * waiting_time);
+
+//       // cprintf("PID %d: priority = %d, waiting = %d, cpu = %d\n", p->pid, p->priority, waiting_time, p->cpu_ticks);
+
+
+//       // Select process with highest priority (tie breaker: lower PID)
+//       if (!selected_proc) {
+//         selected_proc = p;
+//       } else if (p->priority > selected_proc->priority) {
+//         selected_proc = p;
+//       } else if (p->priority == selected_proc->priority && p->pid < selected_proc->pid) {
+//         selected_proc = p;
+//       }
+//     }
+
+
+//     if (selected_proc) {
+//       p = selected_proc;
+
+//       // p->waiting_time = 0;              // reset wait time
+//       // p->last_scheduled = ticks;        // mark last scheduled time
+
+//       // Set response time if first scheduled
+//       if (p->rt == 0)
+//         p->rt = ticks - p->creation_time;
+
+//       c->proc = p;
+//       switchuvm(p);
+//       p->state = RUNNING;
+
+//       p->cs++;
+
+//       swtch(&c->scheduler, p->context);
+
+
+//       switchkvm();
+
+//       // if (p->exec_time > 0) {
+//       //   p->exec_time -= (end - start);
+//       //   if (p->exec_time <= 0) {
+//       //     p->killed = 1;
+//       //   }
+//       // }
+
+//       c->proc = 0;
+//     }
+
+//     release(&ptable.lock);
+//   }
+// }
+
+// void
+// scheduler(void){
+//   struct proc *p;
+//   // struct proc *p1;
+//   struct cpu *c = mycpu();
+//   c->proc = 0;
+
+//   for(;;){
+//     // Enable interrupts on this processor.
+//     sti();
+
+//     struct proc *highP =  0;
+//     // Loop over process table looking for process to run.
+//     acquire(&ptable.lock);
+//     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+//       if(p->state != RUNNABLE)
+//         continue;
+//       // p->wait_time++;
+      
+//       p->priority = INIT_PRIORITY - ALPHA * p->cpu_ticks + BETA * p->wait_time;
+//       if(highP==0){
+//         highP=p;
+//       }
+//       else{
+//         if(highP->priority < p->priority||(highP->priority==p->priority && highP->pid>p->pid)) // larger value, lower priority
+//             highP = p;
+//       }
+//       // Choose one with highest priority
+//       if (highP->first_scheduled == 0) {
+//         highP->rt = ticks - highP->creation_time;  // Response time = first execution - creation
+//         highP->first_scheduled = 1;
+//       }
+//       highP->cs++;  // Count context switches
+//       highP->cpu_ticks++;  // Increment CPU usage time
+//       p->wait_time = 0;
+//       p = highP;
+//       c->proc = p;
+//       switchuvm(p);
+//       p->state = RUNNING;
+      
+//       swtch(&(c->scheduler), p->context);
+//       switchkvm();
+
+//       c->proc = 0;
+//     }
+//     // highP->cs++;  // Count context switches
+//     // highP->cpu_ticks++;  // Increment CPU usage time
+//     // highP->wait_time = 0;
+//     release(&ptable.lock);
+
+//   }
+// }
+
 
 void
 scheduler_start(void)
@@ -578,12 +775,14 @@ int custom_fork(int start_later, int exec_time) {
   // Assign start_later and exec_time
   np->start_later = start_later;
   np->exec_time = exec_time;
-  curproc->cpu_ticks = 0;
-  curproc->wait_time = 0;
-  curproc->priority = INITIAL_PRIORITY;
-  np->creation_time = ticks;  // Track process creation time
+  // curproc->cpu_ticks = 0;
+  // curproc->wait_time = 0;
+  // np->creation_time = ticks;  // Track process creation time
+  // np->cs = 0;  // Initialize context switch count
+  curproc->priority = INIT_PRIORITY;
+  
   np->first_scheduled = 0;
-  np->cs = 0;  // Initialize context switch count
+  
 
   pid = np->pid;
 
@@ -616,6 +815,7 @@ sched(void)
     panic("sched interruptible");
   intena = mycpu()->intena;
   swtch(&p->context, mycpu()->scheduler);
+  p->switches++;
   mycpu()->intena = intena;
 }
 

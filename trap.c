@@ -54,6 +54,16 @@ trap(struct trapframe *tf)
       wakeup(&ticks);
       release(&tickslock);
     }
+    struct proc *p=myproc();
+    if(p && p->state==RUNNING){
+      p->cpu_ticks++;
+      if(p->exec_time>0){
+        p->exec_time--;
+        if(p->exec_time<=0){
+          p->killed=1;
+        }
+      }
+    }
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:
